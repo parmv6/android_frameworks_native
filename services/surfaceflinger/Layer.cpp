@@ -63,6 +63,7 @@ Layer::Layer(SurfaceFlinger* flinger, const sp<Client>& client)
         mFormat(PIXEL_FORMAT_NONE),
         mGLExtensions(GLExtensions::getInstance()),
         mOpaqueLayer(true),
+        mNeedsDithering(false),
         mSecure(false),
         mProtectedByApp(false)
 {
@@ -182,6 +183,10 @@ status_t Layer::setBuffers( uint32_t w, uint32_t h,
         return BAD_VALUE;
     }
 
+    // the display's pixel format
+    //sp<const DisplayDevice> hw(mFlinger->getDefaultDisplayDevice());
+    //getPixelFormatInfo(PixelFormat(hw->getFormat()), &info->pixelFormatInfo);
+
     mFormat = format;
 
     mSecure = (flags & ISurfaceComposerClient::eSecure) ? true : false;
@@ -192,6 +197,21 @@ status_t Layer::setBuffers( uint32_t w, uint32_t h,
     mSurfaceTexture->setDefaultBufferSize(w, h);
     mSurfaceTexture->setDefaultBufferFormat(format);
     mSurfaceTexture->setConsumerUsageBits(getEffectiveUsage(0));
+
+    int useDither = mFlinger->getUseDithering();
+    if (useDither) {
+        if (useDither == 2) {
+            mNeedsDithering = true;
+        }
+        else {
+            // we use the red index
+            //int displayRedSize = info->pixelFormatInfo->getSize(PixelFormatInfo::INDEX_RED);
+            //int layerRedsize = info->pixelFormatInfo->getSize(PixelFormatInfo::INDEX_RED);
+            mNeedsDithering = true; // (layerRedsize > displayRedSize);
+        }
+    } else {
+        mNeedsDithering = false;
+    }
 
     return NO_ERROR;
 }
@@ -348,6 +368,9 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
 
     bool blackOutLayer = isProtected() || (isSecure() && !hw->isSecure());
 
+#ifdef DECIDE_TEXTURE_TARGET
+    GLuint currentTextureTarget = mSurfaceTexture->getCurrentTextureTarget();
+#endif
     if (!blackOutLayer) {
         // TODO: we could be more subtle with isFixedSize()
         const bool useFiltering = getFiltering() || needsFiltering(hw) || isFixedSize();
@@ -358,25 +381,46 @@ void Layer::onDraw(const sp<const DisplayDevice>& hw, const Region& clip) const
         mSurfaceTexture->getTransformMatrix(textureMatrix);
 
         // Set things up for texturing.
+#ifdef DECIDE_TEXTURE_TARGET
+        glBindTexture(currentTextureTarget, mTextureName);
+#else
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, mTextureName);
+#endif
         GLenum filter = GL_NEAREST;
         if (useFiltering) {
             filter = GL_LINEAR;
         }
+#ifdef DECIDE_TEXTURE_TARGET
+        glTexParameterx(currentTextureTarget, GL_TEXTURE_MAG_FILTER, filter);
+        glTexParameterx(currentTextureTarget, GL_TEXTURE_MIN_FILTER, filter);
+#else
         glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, filter);
         glTexParameterx(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, filter);
+#endif
         glMatrixMode(GL_TEXTURE);
         glLoadMatrixf(textureMatrix);
         glMatrixMode(GL_MODELVIEW);
         glDisable(GL_TEXTURE_2D);
+#ifdef DECIDE_TEXTURE_TARGET
+        glEnable(currentTextureTarget);
+#else
         glEnable(GL_TEXTURE_EXTERNAL_OES);
+#endif
     } else {
+#ifdef DECIDE_TEXTURE_TARGET
+        glBindTexture(currentTextureTarget, mFlinger->getProtectedTexName());
+#else
         glBindTexture(GL_TEXTURE_2D, mFlinger->getProtectedTexName());
+#endif
         glMatrixMode(GL_TEXTURE);
         glLoadIdentity();
         glMatrixMode(GL_MODELVIEW);
+#ifdef DECIDE_TEXTURE_TARGET
+        glEnable(currentTextureTarget);
+#else
         glDisable(GL_TEXTURE_EXTERNAL_OES);
         glEnable(GL_TEXTURE_2D);
+#endif
     }
 
     drawWithOpenGL(hw, clip);
@@ -642,8 +686,14 @@ Region Layer::latchBuffer(bool& recomputeVisibleRegions)
 
 
         Reject r(mDrawingState, currentState(), recomputeVisibleRegions);
-
+#ifdef DECIDE_TEXTURE_TARGET
+        // While calling updateTexImage() from SurfaceFlinger, let it know
+        // by passing an extra parameter
+        // This will be true always.
+        if (mSurfaceTexture->updateTexImage(&r, true, true) < NO_ERROR) {
+#else
         if (mSurfaceTexture->updateTexImage(&r, true) < NO_ERROR) {
+#endif
             // something happened!
             recomputeVisibleRegions = true;
             return outDirtyRegion;

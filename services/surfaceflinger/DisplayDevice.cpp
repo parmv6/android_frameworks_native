@@ -28,6 +28,9 @@
 #include <ui/PixelFormat.h>
 
 #include <gui/SurfaceTextureClient.h>
+#ifdef BOARD_EGL_NEEDS_LEGACY_FB
+#include <ui/FramebufferNativeWindow.h>
+#endif
 
 #include <GLES/gl.h>
 #include <EGL/egl.h>
@@ -123,7 +126,11 @@ EGLSurface DisplayDevice::getEGLSurface() const {
 
 void DisplayDevice::init(EGLConfig config)
 {
+#ifndef BOARD_EGL_NEEDS_LEGACY_FB
     ANativeWindow* const window = mNativeWindow.get();
+#else
+    ANativeWindow* const window = new FramebufferNativeWindow();
+#endif
 
     int format;
     window->query(window, NATIVE_WINDOW_FORMAT, &format);
@@ -343,6 +350,20 @@ status_t DisplayDevice::orientationToTransfrom(
         int orientation, int w, int h, Transform* tr)
 {
     uint32_t flags = 0;
+    char value[PROPERTY_VALUE_MAX];
+    property_get("ro.sf.hwrotation", value, "0");
+    int additionalRot = atoi(value);
+
+    if (additionalRot) {
+        additionalRot /= 90;
+        if (orientation == DisplayState::eOrientationUnchanged) {
+            orientation = additionalRot;
+        } else {
+            orientation += additionalRot;
+            orientation %= 4;
+        }
+    }
+
     switch (orientation) {
     case DisplayState::eOrientationDefault:
         flags = Transform::ROT_0;
@@ -359,6 +380,7 @@ status_t DisplayDevice::orientationToTransfrom(
     default:
         return BAD_VALUE;
     }
+
     tr->set(flags, w, h);
     return NO_ERROR;
 }
