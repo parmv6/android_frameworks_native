@@ -25,7 +25,7 @@ namespace android {
 
 volatile int32_t Tracer::sIsReady = 0;
 int Tracer::sTraceFD = -1;
-uint64_t Tracer::sEnabledTags = 0;
+uint64_t Tracer::sEnabledTags = ATRACE_TAG_NOT_READY;
 Mutex Tracer::sMutex;
 
 void Tracer::changeCallback() {
@@ -47,6 +47,7 @@ void Tracer::init() {
         if (sTraceFD == -1) {
             // ALOGE("error opening trace file: %s (%d)", strerror(errno), errno);
             // sEnabledTags remains zero indicating that no tracing can occur
+            sEnabledTags = 0;   // no tracing can occur
         } else {
             loadSystemProperty();
         }
