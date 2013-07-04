@@ -47,6 +47,7 @@ void Tracer::init() {
         if (sTraceFD == -1) {
             // ALOGE("error opening trace file: %s (%d)", strerror(errno), errno);
             // sEnabledTags remains zero indicating that no tracing can occur
+            ALOGW("error opening trace file: %s (%d)", strerror(errno), errno);
             sEnabledTags = 0;   // no tracing can occur
         } else {
             loadSystemProperty();
